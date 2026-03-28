@@ -1,7 +1,7 @@
 # DataPilot MCP
 
 A ChatGPT-style AI data analyst agent built on the **Model Context Protocol (MCP)**.
-Ask questions in plain English — DataPilot writes the SQL, runs it, builds charts, summarizes insights, and emails the report.
+Ask questions in plain English — DataPilot writes the SQL, runs it, builds charts, summarizes insights, and emails the report. 
 
 ---
 <img width="1894" height="902" alt="Datapilot" src="https://github.com/user-attachments/assets/e6abec81-5db2-4205-b06e-020347e9d0f9" />
