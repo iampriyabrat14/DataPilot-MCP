@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+.env
+CLAUDE.md
+DataPilot-MCP
+
 # Distribution / packaging
 .Python
 build/
@@ -205,3 +209,22 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- DataPilot MCP specific ---
+# Uploaded user files — never commit
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+
+# Generated evaluation logs
+backend/evaluation/logs/*
+!backend/evaluation/logs/.gitkeep
+
+# DuckDB database files
+*.db
+*.duckdb
+
+# IDE
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
