@@ -6,7 +6,7 @@ import os
 from flask import Flask, send_from_directory
 from flask_cors import CORS
 
-from backend.config import FLASK_PORT, FLASK_ENV, SECRET_KEY, FRONTEND_DIR, UPLOADS_DIR, EVAL_LOGS_DIR
+from backend.config import FLASK_PORT, FLASK_ENV, SECRET_KEY, FRONTEND_DIR, UPLOADS_DIR, EVAL_LOGS_DIR, ALLOWED_ORIGINS
 
 # ------------------------------------------------------------------ #
 # Ensure runtime directories exist
@@ -20,8 +20,8 @@ os.makedirs(EVAL_LOGS_DIR, exist_ok=True)
 app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET_KEY
 
-# CORS: allow all localhost origins in development
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:*", "http://127.0.0.1:*"]}})
+# CORS: configurable via ALLOWED_ORIGINS env var
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 
 # ------------------------------------------------------------------ #
 # Register blueprints
@@ -80,6 +80,15 @@ def not_found(e):
 def internal_error(e):
     from flask import jsonify
     return jsonify({"error": "Internal server error"}), 500
+
+
+# ------------------------------------------------------------------ #
+# Health check (required by Render / Railway / Fly.io)
+# ------------------------------------------------------------------ #
+@app.route("/health")
+def health():
+    from flask import jsonify
+    return jsonify({"status": "ok"}), 200
 
 
 # ------------------------------------------------------------------ #

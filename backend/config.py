@@ -50,6 +50,16 @@ FLASK_ENV: str = os.getenv("FLASK_ENV", "development")
 FLASK_PORT: int = int(os.getenv("FLASK_PORT", "5000"))
 SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 
+# CORS — comma-separated list of allowed origins
+# e.g. "https://datapilot.yourdomain.com,https://www.yourdomain.com"
+_raw_origins: str = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5000,http://localhost:3000,http://127.0.0.1:5000"
+)
+ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
+IS_PRODUCTION: bool = FLASK_ENV == "production"
+
 # ------------------------------------------------------------------ #
 # Derived paths
 # ------------------------------------------------------------------ #

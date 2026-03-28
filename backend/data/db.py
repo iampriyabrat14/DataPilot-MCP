@@ -4,6 +4,7 @@ Provides query execution and file registration against an in-memory DuckDB insta
 """
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -16,11 +17,17 @@ _connection: duckdb.DuckDBPyConnection | None = None
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
-    """Return the shared DuckDB in-memory connection, creating it if necessary."""
+    """
+    Return the shared DuckDB connection, creating it if necessary.
+    - In production (DUCKDB_PATH set): uses a persistent file so data
+      survives restarts and uploaded file views can be re-registered.
+    - In development: uses in-memory (fast, stateless).
+    """
     global _connection
     if _connection is None:
-        _connection = duckdb.connect(database=":memory:", read_only=False)
-        logger.info("DuckDB in-memory connection created.")
+        db_path = os.getenv("DUCKDB_PATH", ":memory:")
+        _connection = duckdb.connect(database=db_path, read_only=False)
+        logger.info("DuckDB connection created: %s", db_path)
     return _connection
 
 

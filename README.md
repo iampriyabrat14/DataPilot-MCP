@@ -305,6 +305,40 @@ SECRET_KEY=change-me
 
 ---
 
+## Deployment
+
+### Local (development)
+```bash
+python run.py
+```
+
+### Production (Gunicorn + gevent)
+```bash
+pip install -r requirements.txt
+gunicorn -c gunicorn.conf.py "backend.app:app"
+```
+
+### Render / Railway / Fly.io
+1. Push repo to GitHub
+2. Create a new Web Service pointing to the repo
+3. Set **Start Command**: `gunicorn -c gunicorn.conf.py "backend.app:app"`
+4. Add these environment variables in the dashboard:
+
+| Variable | Value |
+|---|---|
+| `FLASK_ENV` | `production` |
+| `SECRET_KEY` | *(generate a random 32-char string)* |
+| `GROQ_API_KEY` | *(your key)* |
+| `ALLOWED_ORIGINS` | `https://your-app.onrender.com` |
+| `DUCKDB_PATH` | `/data/datapilot.duckdb` *(attach a disk)* |
+| `WEB_CONCURRENCY` | `2` |
+
+5. Health check path: `/health`
+
+> **Note:** SSE streaming requires the `gevent` worker — already configured in `gunicorn.conf.py`. Do **not** use the default `sync` worker or streaming will break.
+
+---
+
 ## Security
 
 - Uploaded files validated for type (CSV/Parquet) and size before processing
