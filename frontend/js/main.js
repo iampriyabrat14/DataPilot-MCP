@@ -240,10 +240,12 @@ function renderMessage(data) {
   const hasChart   = data.chart_type && data.chart_type !== 'table' && data.chart_config;
   const hasSummary = Boolean(data.summary);
 
-  // Feature 3: Cache data for export
+  // Cache data for export + chart explanation
   _responseCache.set(chartId, {
-    columns: data.columns || [],
-    rows: data.rows || [],
+    columns:      data.columns      || [],
+    rows:         data.rows         || [],
+    chart_type:   data.chart_type   || '',
+    chart_config: data.chart_config || null,
   });
 
   const row = document.createElement('div');
@@ -291,6 +293,14 @@ function renderMessage(data) {
           ${hasChart ? `
             <button class="export-chart-btn" data-chart-id="${chartId}" title="Export chart as PNG">
               ↓ Chart PNG
+            </button>
+            <button class="explain-chart-btn" data-chart-id="${chartId}" title="Ask AI to explain this chart">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M6.5 5.5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="6.5" cy="3.5" r="0.75" fill="currentColor"/>
+              </svg>
+              Explain Chart
             </button>
           ` : ''}
           <span class="response-meta">
@@ -384,6 +394,12 @@ function renderMessage(data) {
   const pngBtn = row.querySelector('.export-chart-btn');
   if (pngBtn) {
     pngBtn.addEventListener('click', () => _exportChartPng(pngBtn.dataset.chartId));
+  }
+
+  // Explain Chart button
+  const explainBtn = row.querySelector('.explain-chart-btn');
+  if (explainBtn) {
+    explainBtn.addEventListener('click', () => _explainChart(explainBtn, row));
   }
 
   _scrollToBottom();
@@ -817,6 +833,89 @@ function _exportChartPng(chartId) {
   document.body.removeChild(a);
 
   showToast('Chart PNG exported.', 'success', 2500);
+}
+
+// ----------------------------------------------------------------
+// Explain Chart
+// ----------------------------------------------------------------
+
+/**
+ * Call POST /api/explain-chart and render the explanation inside the card.
+ * @param {HTMLButtonElement} btn   - The clicked "Explain Chart" button.
+ * @param {HTMLElement}       row   - The parent message-row element.
+ */
+async function _explainChart(btn, row) {
+  const chartId = btn.dataset.chartId;
+  const cached  = _responseCache.get(chartId);
+  if (!cached || !cached.chart_config) {
+    showToast('No chart data available to explain.', 'info');
+    return;
+  }
+
+  // If explanation already shown, toggle it
+  const existing = row.querySelector('.chart-explanation');
+  if (existing) {
+    existing.style.display = existing.style.display === 'none' ? '' : 'none';
+    btn.textContent = existing.style.display === 'none' ? '💡 Explain Chart' : '💡 Hide Explanation';
+    return;
+  }
+
+  // Disable button and show loading state
+  btn.disabled = true;
+  const originalHTML = btn.innerHTML;
+  btn.innerHTML = '<span class="btn-spinner"></span> Explaining…';
+
+  try {
+    const res = await fetch('/api/explain-chart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chart_type:   cached.chart_type,
+        chart_config: cached.chart_config,
+        columns:      cached.columns,
+        rows:         cached.rows,
+      }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok || json.error) {
+      showToast(json.error || 'Could not explain the chart.', 'error');
+      return;
+    }
+
+    // Insert explanation block after the chart section
+    const chartSection = row.querySelector('.chart-section');
+    const explanationEl = document.createElement('div');
+    explanationEl.className = 'chart-explanation';
+    explanationEl.innerHTML = `
+      <div class="explanation-label">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M6.5 5.5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="6.5" cy="3.5" r="0.75" fill="currentColor"/>
+        </svg>
+        Chart Explanation
+      </div>
+      <p class="explanation-text">${_escapeHtml(json.explanation)}</p>
+    `;
+    if (chartSection) {
+      chartSection.insertAdjacentElement('afterend', explanationEl);
+    } else {
+      row.querySelector('.assistant-card').appendChild(explanationEl);
+    }
+
+    btn.innerHTML = originalHTML;
+    btn.textContent = '💡 Hide Explanation';
+    _scrollToBottom();
+
+  } catch (err) {
+    console.error('[DataPilot] _explainChart error:', err);
+    showToast('Network error — could not explain the chart.', 'error');
+    btn.innerHTML = originalHTML;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ----------------------------------------------------------------
@@ -1432,6 +1531,237 @@ function _initRefreshMetrics() {
 }
 
 // ----------------------------------------------------------------
+// Connect DB Modal
+// ----------------------------------------------------------------
+
+function _initConnectDb() {
+  const openBtn    = document.getElementById('connectDbBtn');
+  const backdrop   = document.getElementById('connectDbModalBackdrop');
+  const closeBtn   = document.getElementById('connectDbModalClose');
+  const cancelBtn  = document.getElementById('connectDbCancelBtn');
+  const submitBtn  = document.getElementById('connectDbSubmitBtn');
+  const feedback   = document.getElementById('connectDbFeedback');
+  const dbStatus   = document.getElementById('dbStatus');
+  const statusText = document.getElementById('dbStatusText');
+  const disconnBtn = document.getElementById('dbDisconnectBtn');
+  const aliasRow   = document.getElementById('dbAliasRow');
+  const portInput  = document.getElementById('dbPort');
+  const typeBtns   = document.querySelectorAll('.db-type-btn');
+
+  if (!openBtn || !backdrop) return;
+
+  // Track selected DB type
+  let _dbType = 'postgres';
+
+  // DB type toggle
+  typeBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      typeBtns.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      _dbType = btn.dataset.type;
+
+      // Swap defaults
+      if (_dbType === 'mssql') {
+        portInput.value = 5432 === parseInt(portInput.value) ? 1433 : portInput.value;
+        if (aliasRow) aliasRow.style.display = 'none';
+        document.getElementById('dbUsername').placeholder = 'sa';
+      } else {
+        portInput.value = 1433 === parseInt(portInput.value) ? 5432 : portInput.value;
+        if (aliasRow) aliasRow.style.display = '';
+        document.getElementById('dbUsername').placeholder = 'postgres';
+      }
+      _clearFeedback();
+    });
+  });
+
+  function _openModal() {
+    backdrop.classList.remove('hidden');
+    document.getElementById('dbHost').focus();
+    _clearFeedback();
+  }
+
+  function _closeModal() {
+    backdrop.classList.add('hidden');
+    _clearFeedback();
+  }
+
+  function _clearFeedback() {
+    if (feedback) {
+      feedback.textContent = '';
+      feedback.className = 'connect-db-feedback hidden';
+    }
+  }
+
+  function _showFeedback(msg, type) {
+    feedback.textContent = msg;
+    feedback.className = `connect-db-feedback connect-db-feedback--${type}`;
+  }
+
+  openBtn.addEventListener('click', _openModal);
+  closeBtn.addEventListener('click', _closeModal);
+  cancelBtn.addEventListener('click', _closeModal);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) _closeModal(); });
+
+  submitBtn.addEventListener('click', async () => {
+    const host     = (document.getElementById('dbHost').value     || '').trim();
+    const port     = parseInt(portInput.value || (_dbType === 'mssql' ? '1433' : '5432'), 10);
+    const database = (document.getElementById('dbDatabase').value || '').trim();
+    const username = (document.getElementById('dbUsername').value || '').trim();
+    const password = document.getElementById('dbPassword').value || '';
+    const alias    = (document.getElementById('dbAlias').value    || 'pg').trim();
+
+    if (!host || !database || !username) {
+      _showFeedback('Host, database, and username are required.', 'error');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    _showFeedback('Connecting…', 'loading');
+
+    try {
+      const payload = { db_type: _dbType, host, port, database, username, password };
+      if (_dbType === 'postgres') payload.alias = alias;
+
+      const res  = await fetch('/api/connect-db', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      const json = await res.json();
+
+      if (!res.ok || json.error) {
+        _showFeedback(json.error || 'Connection failed.', 'error');
+        return;
+      }
+
+      // Success — update sidebar status badge
+      const dbLabel   = _dbType === 'mssql' ? 'SQL Server' : 'PostgreSQL';
+      const tableInfo = `${json.table_count} table${json.table_count !== 1 ? 's' : ''}`;
+      statusText.textContent = `${dbLabel} · ${tableInfo}`;
+      dbStatus.classList.remove('hidden');
+      openBtn.classList.add('hidden');
+
+      showToast(`Connected to ${database} (${dbLabel}) — ${json.table_count} tables available.`, 'success', 4000);
+      _closeModal();
+      loadSchema();
+
+    } catch (err) {
+      console.error('[DataPilot] connect-db error:', err);
+      _showFeedback('Network error — could not reach the server.', 'error');
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  if (disconnBtn) {
+    disconnBtn.addEventListener('click', async () => {
+      // Call server to close mssql connection
+      try { await fetch('/api/disconnect-db', { method: 'POST' }); } catch (_) {}
+      dbStatus.classList.add('hidden');
+      openBtn.classList.remove('hidden');
+      showToast('Disconnected from external database.', 'info', 3000);
+      loadSchema();
+    });
+  }
+}
+
+// ----------------------------------------------------------------
+// ----------------------------------------------------------------
+// Voice Query — Web Speech API
+// ----------------------------------------------------------------
+
+/**
+ * Sets up the mic button for speech-to-text using the Web Speech API.
+ * Transcribed text is inserted into the message input.
+ * Falls back gracefully when the API is unavailable.
+ */
+function _initVoiceInput() {
+  const btn = document.getElementById('micBtn');
+  if (!btn) return;
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    btn.title = 'Voice input not supported in this browser';
+    btn.disabled = true;
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = true;   // show partial results while speaking
+  recognition.maxAlternatives = 1;
+  recognition.continuous = false;
+
+  let _listening = false;
+  let _partialStart = 0;               // cursor position where interim text begins
+
+  function _startListening() {
+    if (_isLoading) return;
+    _listening = true;
+    btn.classList.add('recording');
+    btn.title = 'Listening… click to stop';
+
+    const input = messageInput();
+    _partialStart = input.value.length;
+    // Add a space separator if the input already has text
+    if (_partialStart > 0 && !input.value.endsWith(' ')) {
+      input.value += ' ';
+      _partialStart = input.value.length;
+    }
+
+    recognition.start();
+  }
+
+  function _stopListening() {
+    _listening = false;
+    btn.classList.remove('recording');
+    btn.title = 'Voice input';
+    recognition.stop();
+  }
+
+  btn.addEventListener('click', () => {
+    if (_listening) {
+      _stopListening();
+    } else {
+      _startListening();
+    }
+  });
+
+  // Replace interim text with the latest result on each update
+  recognition.addEventListener('result', (e) => {
+    const input = messageInput();
+    if (!input) return;
+
+    let transcript = '';
+    for (const result of e.results) {
+      transcript += result[0].transcript;
+    }
+
+    // Replace everything from _partialStart onwards with the new transcript
+    input.value = input.value.slice(0, _partialStart) + transcript;
+    _autoResizeTextarea(input);
+  });
+
+  // Auto-stop and trim trailing space when speech ends
+  recognition.addEventListener('end', () => {
+    if (_listening) _stopListening();
+    const input = messageInput();
+    if (input) input.value = input.value.trimEnd();
+  });
+
+  recognition.addEventListener('error', (e) => {
+    _stopListening();
+    const msgs = {
+      'not-allowed': 'Microphone access denied. Please allow mic permission and try again.',
+      'no-speech':   'No speech detected. Please try again.',
+      'network':     'Network error during voice recognition.',
+    };
+    showToast(msgs[e.error] || `Voice error: ${e.error}`, 'error');
+  });
+}
+
+// ----------------------------------------------------------------
 // Initialization
 // ----------------------------------------------------------------
 
@@ -1444,6 +1774,8 @@ document.addEventListener('DOMContentLoaded', () => {
   _initRefreshSchema();
   _initRefreshMetrics();
   _initThemeToggle();   // Feature 7
+  _initVoiceInput();    // Voice Query
+  _initConnectDb();     // Connect DB
 
   loadSchema();
   loadMetrics();

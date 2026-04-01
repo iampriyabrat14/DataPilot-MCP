@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # Module-level singleton connection
 _connection: duckdb.DuckDBPyConnection | None = None
 
+# Module-level SQL Server connection (pymssql)
+_mssql_conn = None
+
 
 def get_connection() -> duckdb.DuckDBPyConnection:
     """
@@ -35,6 +38,9 @@ def execute_query(sql: str) -> dict[str, Any]:
     """
     Execute a SQL query and return structured results.
 
+    Routes to SQL Server (pymssql) when an active mssql connection exists;
+    otherwise executes against the local DuckDB instance.
+
     Returns:
         {
             "columns": list[str],
@@ -46,6 +52,9 @@ def execute_query(sql: str) -> dict[str, Any]:
     Raises:
         Exception — propagated as-is so callers can handle retry logic.
     """
+    if _mssql_conn is not None:
+        return _execute_mssql_query(sql)
+
     conn = get_connection()
     start = time.perf_counter()
     try:
@@ -98,6 +107,151 @@ def _normalize_rows(rows: list[list]) -> list[list]:
     return normalized
 
 
+def attach_postgres(host: str, port: int, database: str, username: str, password: str, alias: str = "pg") -> list[str]:
+    """
+    Attach a PostgreSQL database to the DuckDB session via the postgres extension.
+
+    All Postgres tables become queryable as  <alias>.<schema>.<table>  in DuckDB.
+
+    Args:
+        host:     Postgres server hostname or IP.
+        port:     Postgres port (typically 5432).
+        database: Database name.
+        username: Postgres user.
+        password: Postgres password.
+        alias:    DuckDB schema alias to use (default "pg").
+
+    Returns:
+        List of table names visible through the attached connection.
+
+    Raises:
+        Exception — propagated so the route can return a structured error.
+    """
+    conn = get_connection()
+
+    # Install and load the postgres extension (no-op if already loaded)
+    conn.execute("INSTALL postgres; LOAD postgres;")
+
+    url = f"postgresql://{username}:{password}@{host}:{port}/{database}"
+    conn.execute(f"ATTACH IF NOT EXISTS '{url}' AS {alias} (TYPE postgres, READ_ONLY)")
+
+    # List tables visible through the attached alias
+    rows = conn.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = ? ORDER BY table_name",
+        [alias],
+    ).fetchall()
+
+    table_names = [r[0] for r in rows]
+    logger.info(
+        "Attached Postgres db=%s@%s:%s/%s as alias '%s' — %d tables",
+        username, host, port, database, alias, len(table_names),
+    )
+    return table_names
+
+
+def attach_mssql(host: str, port: int, database: str, username: str, password: str) -> list[str]:
+    """
+    Open a pymssql connection to a SQL Server instance and store it globally.
+
+    Subsequent calls to execute_query() will be routed through this connection
+    until detach_mssql() is called.
+
+    Returns:
+        List of user table names in the connected database.
+
+    Raises:
+        Exception — propagated so the route can return a structured error.
+    """
+    global _mssql_conn
+    import pymssql  # lazy import — only needed when SQL Server is used
+
+    conn = pymssql.connect(
+        server=host,
+        port=port,
+        database=database,
+        user=username,
+        password=password,
+        as_dict=False,
+        autocommit=True,
+        timeout=10,
+        login_timeout=10,
+    )
+
+    _mssql_conn = conn
+    logger.info("SQL Server connection established: %s@%s:%s/%s", username, host, port, database)
+
+    # List user tables
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+        "WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_CATALOG = %s "
+        "ORDER BY TABLE_NAME",
+        (database,),
+    )
+    tables = [row[0] for row in cursor.fetchall()]
+    cursor.close()
+    return tables
+
+
+def detach_mssql() -> None:
+    """Close and clear the active SQL Server connection."""
+    global _mssql_conn
+    if _mssql_conn is not None:
+        try:
+            _mssql_conn.close()
+        except Exception:
+            pass
+        _mssql_conn = None
+        logger.info("SQL Server connection closed.")
+
+
+def get_mssql_schema() -> dict[str, list[dict[str, str]]]:
+    """
+    Return column metadata for all user tables in the connected SQL Server database.
+    Returns the same shape as get_schema() so the rest of the pipeline is unaffected.
+    """
+    if _mssql_conn is None:
+        return {}
+
+    cursor = _mssql_conn.cursor()
+    cursor.execute(
+        "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE "
+        "FROM INFORMATION_SCHEMA.COLUMNS "
+        "ORDER BY TABLE_NAME, ORDINAL_POSITION"
+    )
+    schema: dict[str, list[dict[str, str]]] = {}
+    for table, col, dtype in cursor.fetchall():
+        schema.setdefault(table, []).append({"name": col, "type": dtype})
+    cursor.close()
+    return schema
+
+
+def _execute_mssql_query(sql: str) -> dict[str, Any]:
+    """Execute SQL against the active SQL Server connection."""
+    start = time.perf_counter()
+    cursor = _mssql_conn.cursor()
+    try:
+        cursor.execute(sql)
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        rows = [list(row) for row in cursor.fetchall()]
+        rows = _normalize_rows(rows)
+        latency_ms = (time.perf_counter() - start) * 1000
+        logger.debug("MSSQL query executed: %d rows, %.1f ms", len(rows), latency_ms)
+        return {
+            "columns":    columns,
+            "rows":       rows,
+            "row_count":  len(rows),
+            "latency_ms": round(latency_ms, 2),
+        }
+    except Exception:
+        latency_ms = (time.perf_counter() - start) * 1000
+        logger.exception("MSSQL query failed after %.1f ms: %s", latency_ms, sql[:200])
+        raise
+    finally:
+        cursor.close()
+
+
 def register_file(path: str, table_name: str) -> None:
     """
     Register a CSV or Parquet file as a virtual DuckDB view.
@@ -126,6 +280,9 @@ def get_schema() -> dict[str, list[dict[str, str]]]:
     """
     Return all tables and views with their column names and types.
 
+    When a SQL Server connection is active, delegates to get_mssql_schema()
+    so the Schema panel reflects the connected external database.
+
     Returns:
         {
             "table_name": [
@@ -135,6 +292,9 @@ def get_schema() -> dict[str, list[dict[str, str]]]:
             ...
         }
     """
+    if _mssql_conn is not None:
+        return get_mssql_schema()
+
     conn = get_connection()
 
     # Fetch all tables and views

@@ -34,6 +34,8 @@ from backend.routes.metrics_route import metrics_bp
 from backend.routes.history import history_bp
 from backend.routes.query_stream import query_stream_bp
 from backend.routes.suggestions import suggestions_bp
+from backend.routes.explain_chart import explain_chart_bp
+from backend.routes.connect_db import connect_db_bp
 
 app.register_blueprint(query_bp)
 app.register_blueprint(upload_bp)
@@ -43,6 +45,8 @@ app.register_blueprint(metrics_bp)
 app.register_blueprint(history_bp)
 app.register_blueprint(query_stream_bp)
 app.register_blueprint(suggestions_bp)
+app.register_blueprint(explain_chart_bp)
+app.register_blueprint(connect_db_bp)
 
 # ------------------------------------------------------------------ #
 # Serve frontend static files

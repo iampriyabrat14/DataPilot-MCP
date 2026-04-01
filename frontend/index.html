@@ -57,6 +57,24 @@
       </div>
     </div>
 
+    <!-- Connect Database -->
+    <div class="sidebar-section">
+      <h3 class="section-label">Connect Database</h3>
+      <button class="connect-db-btn" id="connectDbBtn">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+          <ellipse cx="7.5" cy="3.5" rx="5.5" ry="2" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M2 3.5v4c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-4" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M2 7.5v4c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-4" stroke="currentColor" stroke-width="1.5"/>
+        </svg>
+        Connect to Database
+      </button>
+      <div class="db-status hidden" id="dbStatus">
+        <span class="db-status-dot"></span>
+        <span class="db-status-text" id="dbStatusText">Connected</span>
+        <button class="db-disconnect-btn" id="dbDisconnectBtn" title="Disconnect">✕</button>
+      </div>
+    </div>
+
     <!-- Uploaded Files List -->
     <div class="sidebar-section">
       <h3 class="section-label">Uploaded Files</h3>
@@ -194,13 +212,21 @@
           rows="1"
           maxlength="2000"
         ></textarea>
+        <button class="mic-btn" id="micBtn" title="Voice input" aria-label="Start voice input">
+          <svg class="mic-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect x="6" y="1" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M3 9a6 6 0 0012 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <line x1="9" y1="15" x2="9" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <line x1="6" y1="17" x2="12" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
         <button class="send-btn" id="sendBtn" title="Send message">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
             <path d="M18 10L4 4l2.5 6L4 16l14-6z" fill="currentColor"/>
           </svg>
         </button>
       </div>
-      <p class="input-hint">Press <kbd>Enter</kbd> to send &middot; <kbd>Shift+Enter</kbd> for new line</p>
+      <p class="input-hint">Press <kbd>Enter</kbd> to send &middot; <kbd>Shift+Enter</kbd> for new line &middot; <kbd>🎤</kbd> for voice</p>
     </div>
   </main>
 </div>
@@ -261,6 +287,82 @@
           <path d="M14 8L2 3l2 5-2 5 12-5z" fill="currentColor"/>
         </svg>
         Send Email
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     CONNECT DB MODAL
+================================================================ -->
+<div class="modal-backdrop hidden" id="connectDbModalBackdrop">
+  <div class="modal" id="connectDbModal" role="dialog" aria-modal="true" aria-labelledby="connectDbModalTitle">
+    <div class="modal-header">
+      <h2 class="modal-title" id="connectDbModalTitle">Connect Database</h2>
+      <button class="modal-close" id="connectDbModalClose" title="Close">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M3 3L13 13M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <!-- DB Type Toggle -->
+      <div class="db-type-toggle" id="dbTypeToggle">
+        <button class="db-type-btn active" data-type="postgres" id="dbTypePostgres">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <ellipse cx="7" cy="3" rx="5" ry="1.8" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M2 3v4c0 1 2.24 1.8 5 1.8s5-.8 5-1.8V3" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M2 7v4c0 1 2.24 1.8 5 1.8s5-.8 5-1.8V7" stroke="currentColor" stroke-width="1.4"/>
+          </svg>
+          PostgreSQL
+        </button>
+        <button class="db-type-btn" data-type="mssql" id="dbTypeMssql">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <rect x="2" y="2" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M5 7h4M7 5v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          SQL Server
+        </button>
+      </div>
+
+      <div class="connect-db-grid">
+        <div class="form-group connect-db-host">
+          <label class="form-label" for="dbHost">Host *</label>
+          <input type="text" id="dbHost" class="form-input" placeholder="db.example.com" autocomplete="off" />
+        </div>
+        <div class="form-group connect-db-port">
+          <label class="form-label" for="dbPort">Port</label>
+          <input type="number" id="dbPort" class="form-input" value="5432" min="1" max="65535" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="dbDatabase">Database *</label>
+        <input type="text" id="dbDatabase" class="form-input" placeholder="mydb" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="dbUsername">Username *</label>
+        <input type="text" id="dbUsername" class="form-input" placeholder="postgres" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="dbPassword">Password</label>
+        <input type="password" id="dbPassword" class="form-input" placeholder="••••••••" autocomplete="new-password" />
+      </div>
+      <!-- Alias row — only shown for Postgres -->
+      <div class="form-group" id="dbAliasRow">
+        <label class="form-label" for="dbAlias">Schema alias <span class="form-hint">(used to prefix tables, e.g. pg.orders)</span></label>
+        <input type="text" id="dbAlias" class="form-input" value="pg" maxlength="31" />
+      </div>
+      <div class="connect-db-feedback hidden" id="connectDbFeedback"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="connectDbCancelBtn">Cancel</button>
+      <button class="btn-primary" id="connectDbSubmitBtn">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+          <ellipse cx="7.5" cy="3.5" rx="5.5" ry="2" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M2 3.5v4c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-4" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M2 7.5v4c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-4" stroke="currentColor" stroke-width="1.5"/>
+        </svg>
+        Connect
       </button>
     </div>
   </div>
